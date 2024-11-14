@@ -148,7 +148,7 @@ pte_t *translate(pde_t *pgdir, void *va) {
     return NULL; 
 }
 
-static void set_bit_at_index(char *bitmap, int index, int size) {
+static void set_bit_at_index(char *bitmap, int index, int size, int value) {
     if(index >= size * 8 || index < 0)
     {
     	printf("Invalid set index\n");
@@ -156,7 +156,8 @@ static void set_bit_at_index(char *bitmap, int index, int size) {
     }
     int i = index / 8;
     int j = (index % 8);
-    bitmap[i] = bitmap[i] | 1 << j;
+    if(value) bitmap[i] = bitmap[i] | 1 << j;
+    else bitmap[i] = bitmap[i] & 0 << j;
     return;
 }
 
@@ -209,18 +210,40 @@ int map_page(pde_t *pgdir, void *va, void *pa) {
 
 /*Function that gets the next available page
 */
-void *get_next_avail(int num_pages) {
+int get_next_avail(int num_pages) {
  
     //Use virtual address bitmap to find the next free page
-    //num_pages should be == virt_bitmap_size
     //What should 1 or 0 mean in bitmap? (0 = page full/does not exist)
+
     for(int i = 0; i < num_pages; i++){
-        if(get_bit_at_index(virt_bitmap, i, num_pages) == 1){
-            void *page = (void *) directory[i];
-            return page;
+        if(get_bit_at_index(virt_bitmap, i, num_pages) == 0){
+            set_bit_at_index(virt_bitmap, i, virt_bitmap_size, 1);
+            //return (void *) &directory[i];
+            return i;
         }
     }
-    printf("No page available\n");
+
+    /*
+    void **page_list = (void **)malloc(num_pages * sizeof(void *));
+    int j = 0;
+    for(int i = 0; i < virt_bitmap_size; i++){
+        if(get_bit_at_index(virt_bitmap, i, virt_bitmap_size) == 1){
+            void *page = (void *) directory[i];
+            page_list[j++] = page;
+        }
+        else{ // If page does not exist, create page
+            if((int) directory[i] == 0){
+                pte_t *new_page = malloc(pow2(inner_page_bits) * sizeof(pte_t *));
+                directory[i] = new_page;
+                set_bit_at_index(virt_bitmap, i, virt_bitmap_size, 1);
+                page_list[j++] = (void *) new_page;
+            }
+        }
+        if(--num_pages == 0) return page_list;
+    }
+    printf("Not enough pages available. %d pages left\n", num_pages);
+    */
+   printf("No page available\n");
     return NULL;
 }
 
@@ -271,14 +294,45 @@ void *n_malloc(unsigned int num_bytes) {
    }
    num_pages++;
    */
-   if(!phys_init) {
+    if(!phys_init) {
         set_physical_mem();
         directory = (pde_t *) malloc(pow2(outer_page_bits) * sizeof(pde_t *));
-   }
-   while(num_bytes > PGSIZE){ //bytes left to allocate
-    num_bytes -= PGSIZE;
-    
-   }
+        memset(directory, 0, pow2(outer_page_bits) * sizeof(pde_t *));
+    }
+    int num_pages = num_bytes / PGSIZE;
+    if(num_bytes % PGSIZE != 0) num_pages++;
+    /*
+    void **page_list = get_next_avail(num_pages);
+    if(page_list == NULL){
+            // TODO: Implement logic for pgdir being full
+    }
+    */
+    for(int i = 0; i < num_pages; i++){ //pages left to allocate
+        //num_bytes -= PGSIZE;
+        unsigned int virt_addr = 0;
+
+        // Find next open spot in page_dir
+        int dir_index = get_next_avail(virt_bitmap_size);
+        pte_t *new_page = (pte_t *)malloc(PGSIZE);
+        directory[dir_index] = &new_page;
+        virt_addr += (dir_index << 32 - outer_page_bits);
+
+        // Find next open spot in physical mem
+        int alloc_success = 0;
+        for(int j = 0; j < phys_bitmap_size; j++){
+            if(get_bit_at_index(phys_bitmap, j, phys_bitmap_size) == 0){
+                set_bit_at_index(phys_bitmap, j, phys_bitmap_size, 1);
+                void *phys_addr = &phys_mem[j * PGSIZE / 8];
+                alloc_success = 1;
+                break;
+            }
+        }
+        if(!alloc_success){
+            printf("No physical memory available\n");
+            //TODO: What to do when no phys mem available
+        }
+        //map_page(directory, )
+    }
 
     return NULL;
 }
