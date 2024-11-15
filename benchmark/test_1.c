@@ -13,10 +13,10 @@ int main() {
     //printf("%d\n", (1<<10));
     //set_physical_mem();
     //translate(NULL, (void *)4292169728);
-    //n_malloc(1);
-    void *t = n_malloc(1);
-    pte_t *test = translate(directory, 0);
-    printf("t: %p\n", t);
-    printf("test: %lu\n", *test);
+    n_malloc(1);
+    void *t = n_malloc(4097);
+    pte_t *test = translate(directory, t);
+    printf("t: %u\n", (unsigned int)t);
+    printf("test: %u\n", (unsigned int)test);
     return 0;
 }

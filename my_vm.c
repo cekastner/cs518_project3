@@ -21,6 +21,7 @@ void set_physical_mem() {
     //virtual and physical bitmaps and initialize them
     phys_init = 1;
     phys_mem = (void *)malloc(MEMSIZE);
+    memset(phys_mem, 0, MEMSIZE);
     //*pte_mem = (pte_t *)malloc()
     offset_bits = (int) log2(PGSIZE);
     num_virt = 32 - offset_bits;
@@ -51,7 +52,7 @@ void set_physical_mem() {
         memset(virt_bitmap, 0, pow2(outer_page_bits) / 8 + 1);
         virt_bitmap_size = pow2(outer_page_bits) / 8 + 1;
     }
-    printf("Offset: %d, Inner: %d, Outer: %d\n", offset_bits, inner_page_bits, outer_page_bits);
+    //printf("Offset: %d, Inner: %d, Outer: %d\n", offset_bits, inner_page_bits, outer_page_bits);
 }
 
 
@@ -135,11 +136,16 @@ pte_t *translate(pde_t *pgdir, void *va) {
     * Part 2 HINT: Check the TLB before performing the translation. If
     * translation exists, then you can return physical address from the TLB.
     */
+   //printf("va: %u\n", (unsigned int) va);
    unsigned int outer_pg_addr = get_top_bits((unsigned int) va, outer_page_bits);
    unsigned int inner_pg_addr = get_bottom_bits(get_top_bits((unsigned int) va, outer_page_bits + inner_page_bits));
-   printf("Outer: %d, Inner: %d\n", outer_pg_addr, inner_pg_addr);
-   pte_t *inner_pg = &pgdir[outer_pg_addr];
-   return (pte_t *)inner_pg[inner_pg_addr];
+   //printf("Outer: %d, Inner: %d\n", outer_pg_addr, inner_pg_addr);
+   pte_t *inner_pg = (pte_t *)pgdir[outer_pg_addr];
+   //printf("inner_pg: %u\n", (unsigned int)inner_pg);
+   //printf("pg[addr]: %lu\n", inner_pg[inner_pg_addr]);
+   pte_t *phys = (pte_t *) inner_pg[inner_pg_addr];
+   return phys;
+   //return (pte_t *)inner_pg[inner_pg_addr];
     // As of now translate will correctly get the right values of the address.
     // Still need to test if the correct value is returned.
 
@@ -188,11 +194,11 @@ int map_page(pde_t *pgdir, void *va, void *pa) {
     if(get_bit_at_index(virt_bitmap, outer_pg_addr, virt_bitmap_size) == 1){ // If inner page exists
         pte_t *inner_pg;
         inner_pg = (pte_t *)pgdir[outer_pg_addr];
-        printf("addr: %d\n", inner_pg_addr);
-        printf("inner page[addr] before: %ld\n", inner_pg[inner_pg_addr]);
+        //printf("addr: %d\n", inner_pg_addr);
+        //printf("inner page[addr] before: %ld\n", inner_pg[inner_pg_addr]);
         if(inner_pg[inner_pg_addr] == 0){
             inner_pg[inner_pg_addr] = (long unsigned int) pa;
-            printf("inner page[addr] after: %lu\n", inner_pg[inner_pg_addr]);
+            //printf("inner page[addr] after: %lu\n", inner_pg[inner_pg_addr]);
             printf("Mapping successful\n");
             return 1;
         }
@@ -300,8 +306,8 @@ void *n_malloc(unsigned int num_bytes) {
    */
     if(!phys_init) {
         set_physical_mem();
-        directory = (pde_t *) malloc(pow2(outer_page_bits) * sizeof(pde_t *));
-        memset(directory, 0, pow2(outer_page_bits) * sizeof(pde_t *));
+        directory = phys_mem;
+        set_bit_at_index(phys_bitmap, 0, phys_bitmap_size, 1);
     }
     int num_pages = num_bytes / PGSIZE;
     if(num_bytes % PGSIZE != 0) num_pages++;
@@ -315,26 +321,36 @@ void *n_malloc(unsigned int num_bytes) {
 
     // Find next open spot in page_dir
     int dir_index = get_next_avail(virt_bitmap_size);
-    pte_t *new_page = (pte_t *)malloc(PGSIZE);
-    memset((void *)new_page, 0, PGSIZE);
+    void *new_page;
+    int alloc_success = 0;
+    for(int i = 0; i < phys_bitmap_size; i++){
+        if(get_bit_at_index(phys_bitmap, i, phys_bitmap_size) == 0){
+            set_bit_at_index(phys_bitmap, i, phys_bitmap_size, 1);
+            new_page = &((char *)phys_mem)[i * PGSIZE / 8];
+            alloc_success = 1;
+            break;
+        }
+    }
+    if(!alloc_success){
+        printf("No physical memory available\n");
+        //TODO: What to do when no phys mem available
+    }
     directory[dir_index] = (pde_t)new_page;
-    printf("dir_index: %d, dir[ind]: %ld\n", dir_index, directory[dir_index]);
+    //printf("dir_index: %d, dir[ind]: %lu\n", dir_index, directory[dir_index]);
     virt_addr += (dir_index << 32 - outer_page_bits);
-    printf("virt_addr: %d\n", virt_addr);
+    //printf("virt_addr: %d\n", virt_addr);
     void *phys_addr;
-
+    unsigned int virt_addr_temp;
     for(int i = 0; i < num_pages; i++){ //pages left to allocate
         //num_bytes -= PGSIZE;
-        unsigned int virt_addr_temp = virt_addr + (i << 32 - outer_page_bits - inner_page_bits);
-        printf("virt_addr_temp: %d\n", virt_addr_temp);
+        virt_addr_temp = virt_addr + (i << 32 - outer_page_bits - inner_page_bits);
+        //printf("virt_addr_temp: %d\n", virt_addr_temp);
         //printf("outer_bits: %d, inner_bits: %d\n", outer_page_bits, inner_page_bits);
         //printf("bin_test: %d\n", (32 - outer_page_bits + inner_page_bits));
 
         // Find next open spot in physical mem
-        int alloc_success = 0;
-        int j = 0;
-        while(j < phys_bitmap_size){
-            j++;
+        alloc_success = 0;
+        for(int j = 0; j < phys_bitmap_size; j++){
             if(get_bit_at_index(phys_bitmap, j, phys_bitmap_size) == 0){
                 set_bit_at_index(phys_bitmap, j, phys_bitmap_size, 1);
                 phys_addr = &((char *)phys_mem)[j * PGSIZE / 8];
@@ -348,9 +364,9 @@ void *n_malloc(unsigned int num_bytes) {
         }
         map_page(directory, (void *) virt_addr_temp, phys_addr);
     }
-
-    // Return physical address or virtual address?
-    return phys_addr;
+    // When there are multiple va's, do we return first or last va?
+    // return temp for last and reg for first
+    return (void *) virt_addr;
 }
 
 /* Responsible for releasing one or more memory pages using virtual address (va)
